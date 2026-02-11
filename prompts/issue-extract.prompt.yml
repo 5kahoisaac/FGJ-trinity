@@ -9,7 +9,8 @@ messages:
   - role: user
     content: "Use JSON format as specified in the response schema for: <text>{{body}}</text> [https://github.com/actions/ai-inference](https://github.com/actions/ai-inference)"
 
-responseFormat: json_schema
+responseFormat: |
+  json_schema
 jsonSchema: |
   {
     "name": "issue_details",
