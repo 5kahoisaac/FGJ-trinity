@@ -31,7 +31,7 @@ jobs:
               "messages": [
                 {
                   "role": "system",
-                  "content": "You are a precise bug report parser. Output **ONLY** valid JSON with these exact keys (nothing else):\n{\"summary\": \"short one-line title\", \"description\": \"full details + repro steps\", \"priority\": \"High|Medium|Low\", \"figma_url\": \"Figma link or empty string\", \"screenshot_url\": \"image URL or empty\"}\nUse defaults if unsure."
+                  "content": "You are a precise bug report parser; output only valid JSON with these exact keys — `summary` (short one-line title), `description` (full details and repro steps), `priority` ("High" | "Medium" | "Low"), `figma_url` (Figma link or empty, split by comma), and `attachment_url` (image or file URLs, or empty, split by comma) — using defaults if unsure."
                 },
                 {
                   "role": "user",
@@ -41,20 +41,6 @@ jobs:
               "max_tokens": 600,
               "temperature": 0.0
             }')
-
-          # Debug: Print raw response from the model
-          echo "===== DEBUG: Raw API Response from GitHub Models ====="
-          echo "$RESPONSE"
-          echo "===== END RAW RESPONSE ====="
-
-          # Debug: Try to show the actual content the model returned
-          echo "===== DEBUG: Model content (if exists) ====="
-          if echo "$RESPONSE" | jq -e '.choices[0].message.content' >/dev/null 2>&1; then
-            echo "$RESPONSE" | jq -r '.choices[0].message.content'
-          else
-            echo "No valid .choices[0].message.content found"
-          fi
-          echo "===== END MODEL CONTENT ====="
 
           if echo "$RESPONSE" | jq -e '.choices[0].message.content | fromjson' >/dev/null 2>&1; then
             CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson')
