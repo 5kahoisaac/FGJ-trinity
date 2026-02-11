@@ -15,22 +15,26 @@ jobs:
     - name: Extract bug data with AI
       id: extract
       env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         ISSUE_BODY: ${{ github.event.issue.body }}
         ISSUE_NUMBER: ${{ github.event.issue.number }}
         ISSUE_TITLE: ${{ github.event.issue.title }}
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
-        RESPONSE=$(curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" -H "User-Agent: GitHubActions" -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Extract bug report fields from GitHub issue. Output ONLY valid JSON: {\"summary\":\"One-line bug summary\",\"description\":\"Full description\",\"priority\":\"High|Medium|Low\",\"figma_url\":\"Figma link or empty\",\"screenshot_url\":\"image URL or empty\",\"project_key\":\"YOUR-PROJECT-KEY\"}\n\nTitle: ${ISSUE_TITLE}\nBody: ${ISSUE_BODY}"}],"max_tokens":500,"temperature":0.1}' https://models.github.com/v1/chat/completions)
+        RESPONSE=$(curl -s -X POST \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Content-Type: application/json" \
+          https://models.github.ai/inference/chat/completions \
+          -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Extract bug report fields from GitHub issue. Output ONLY valid JSON: {\"summary\":\"One-line bug summary\",\"description\":\"Full description with steps\",\"priority\":\"High|Medium|Low\",\"figma_url\":\"Figma prototype/node link or empty\",\"screenshot_url\":\"GitHub image URL or empty\",\"project_key\":\"YOUR-PROJECT-KEY\"}\n\nTitle: '${ISSUE_TITLE}'\nBody: '${ISSUE_BODY}'"}],"max_tokens":500,"temperature":0.1}')
         
         echo "response=$RESPONSE" >> $GITHUB_OUTPUT
         
         if echo "$RESPONSE" | jq -e '.choices' >/dev/null 2>&1; then
-          SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson | .summary // empty')
-          FIGMA_URL=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson | .figma_url // empty')
+          SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson | .summary // "'${ISSUE_TITLE} - Bug Report'"')
+          FIGMA_URL=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson | .figma_url // ""')
           PRIORITY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson | .priority // "Medium"')
-          DESCRIPTION=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson | .description // "${ISSUE_BODY}"')
+          DESCRIPTION=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson | .description // "'${ISSUE_BODY}'"')
           PROJECT_KEY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson | .project_key // "YOUR-PROJECT-KEY"')
-          SCREENSHOT_URL=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson | .screenshot_url // empty')
+          SCREENSHOT_URL=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson | .screenshot_url // ""')
         else
           SUMMARY="${ISSUE_TITLE} - Bug Report"
           PRIORITY="Medium"
