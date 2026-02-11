@@ -22,28 +22,24 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          RESPONSE=$(curl -s -X POST \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Content-Type: application/json" \
-            https://models.github.ai/inference/chat/completions \
-            -d '{
-              "model": "openai/gpt-4o",
-              "messages": [
+          # Build JSON payload safely with jq
+          PAYLOAD=$(jq -n \
+            --arg title "$ISSUE_TITLE" \
+            --arg body "$ISSUE_BODY" \
+            '{
+              model: "openai/gpt-4o",
+              messages: [
                 {
-                  "role": "system",
-                  "content": "You are an expert at summarizing bug reports concisely and accurately. Analyze the GitHub issue title and body. Output **ONLY** valid JSON (no extra text, no markdown, no explanations) with exactly these keys:\n{\n  \"summary\": \"A clear, specific, actionable one-line summary of the ACTUAL bug/problem (make it informative and descriptive, e.g. \\\"Unexpected login button appears on KYC completion screen\\\" instead of generic phrases like \\\"bug report\\\" or \\\"short one-line title\\\")\",\n  \"description\": \"Full detailed bug description including reproduction steps, observed vs expected behavior, and all relevant context from the issue body\",\n  \"priority\": \"High|Medium|Low (infer from severity, urgency, or impact if possible; default to Medium)\",\n  \"figma_url\": \"Direct Figma prototype/node/link if present, otherwise empty string\",\n  \"screenshot_url\": \"Direct image/screenshot URL if present, otherwise empty string\"\n}\nAlways derive the summary from the real problem described in the title and body — do NOT use placeholder text."
+                  role: "system",
+                  content: "You are an expert at summarizing bug reports concisely and accurately. Analyze the GitHub issue title and body. Output **ONLY** valid JSON (no extra text, no markdown, no explanations) with exactly these keys:\n{\n  \"summary\": \"A clear, specific, actionable one-line summary of the ACTUAL bug/problem (make it informative and descriptive, e.g. \\\"Unexpected login button appears on KYC completion screen\\\" instead of generic phrases like \\\"bug report\\\" or \\\"short one-line title\\\")\",\n  \"description\": \"Full detailed bug description including reproduction steps, observed vs expected behavior, and all relevant context from the issue body\",\n  \"priority\": \"High|Medium|Low (infer from severity, urgency, or impact if possible; default to Medium)\",\n  \"figma_url\": \"Direct Figma prototype/node/link if present, otherwise empty string\",\n  \"screenshot_url\": \"Direct image/screenshot URL if present, otherwise empty string\"\n}\nAlways derive the summary from the real problem described in the title and body — do NOT use placeholder text."
                 },
                 {
-                  "role": "user",
-                  "content": "Title: \"${ISSUE_TITLE}\"\n\nBody:\n${ISSUE_BODY}"
+                  role: "user",
+                  content: "Title: \"\($title)\"\n\nBody:\n\($body)"
                 }
               ],
-              "max_tokens": 800,
-              "temperature": 0.2
+              max_tokens: 800,
+              temperature: 0.2
             }')
 
-          if echo "$RESPONSE" | jq -e '.choices[0].message.content | fromjson' >/dev/null 2>&1; then
-            CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson')
-            SUMMARY=$(echo "$CONTENT" | jq -r '.summary // "'"$ISSUE_TITLE"'"')
-            # Emergency cleanup if summary is still too generic
-            if [[ "$SUMMARY" =~ "short one-line" || "$SUMMARY" =~ "Bug Report" || -z "$SUMMARY" ]]; then
+          RESPONSE=$(curl -s -X
