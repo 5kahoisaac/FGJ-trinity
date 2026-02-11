@@ -42,6 +42,8 @@ jobs:
               "temperature": 0.0
             }')
 
+          echo "$(echo "$ISSUE_BODY" | jq -sR .)";
+
           if echo "$RESPONSE" | jq -e '.choices[0].message.content | fromjson' >/dev/null 2>&1; then
             CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson')
             SUMMARY=$(echo "$CONTENT" | jq -r '.summary // "'"$ISSUE_TITLE"' - Bug"')
