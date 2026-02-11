@@ -22,50 +22,40 @@ jobs:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
-          # Build JSON payload safely with jq
-          PAYLOAD=$(jq -n \
-            --arg title "$ISSUE_TITLE" \
-            --arg body "$ISSUE_BODY" \
-            '{
-              model: "openai/gpt-4o",
-              messages: [
-                {
-                  role: "system",
-                  content: "You are an expert at summarizing bug reports concisely and accurately. Analyze the GitHub issue title and body. Output **ONLY** valid JSON (no extra text, no markdown, no explanations) with exactly these keys:\n{\n  \"summary\": \"A clear, specific, actionable one-line summary of the ACTUAL bug/problem (make it informative and descriptive, e.g. \\\"Unexpected login button appears on KYC completion screen\\\" instead of generic phrases like \\\"bug report\\\" or \\\"short one-line title\\\")\",\n  \"description\": \"Full detailed bug description including reproduction steps, observed vs expected behavior, and all relevant context from the issue body\",\n  \"priority\": \"High|Medium|Low (infer from severity, urgency, or impact if possible; default to Medium)\",\n  \"figma_url\": \"Direct Figma prototype/node/link if present, otherwise empty string\",\n  \"screenshot_url\": \"Direct image/screenshot URL if present, otherwise empty string\"\n}\nAlways derive the summary from the real problem described in the title and body — do NOT use placeholder text."
-                },
-                {
-                  role: "user",
-                  content: "Title: \"\($title)\"\n\nBody:\n\($body)"
-                }
-              ],
-              max_tokens: 800,
-              temperature: 0.2
-            }')
-
           RESPONSE=$(curl -s -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
             -H "Content-Type: application/json" \
             https://models.github.ai/inference/chat/completions \
-            -d "$PAYLOAD")
+            -d '{
+              "model": "openai/gpt-4o",
+              "messages": [
+                {
+                  "role": "system",
+                  "content": "You are a precise bug report parser. Output **ONLY** valid JSON with these exact keys (nothing else):\n{\"summary\": \"short one-line title\", \"description\": \"full details + repro steps\", \"priority\": \"High|Medium|Low\", \"figma_url\": \"Figma link or empty string\", \"screenshot_url\": \"image URL or empty\"}\nUse defaults if unsure."
+                },
+                {
+                  "role": "user",
+                  "content": "Title: \"${ISSUE_TITLE}\"\n\nBody:\n$(echo "$ISSUE_BODY" | jq -sR .)\"}"
+                }
+              ],
+              "max_tokens": 600,
+              "temperature": 0.0
+            }')
 
           if echo "$RESPONSE" | jq -e '.choices[0].message.content | fromjson' >/dev/null 2>&1; then
             CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson')
-            SUMMARY=$(echo "$CONTENT" | jq -r '.summary // "'"$ISSUE_TITLE"'"')
-            # Emergency cleanup if summary is still too generic
-            if [[ "$SUMMARY" =~ "short one-line" || "$SUMMARY" =~ "Bug Report" || -z "$SUMMARY" ]]; then
-              SUMMARY=$(echo -e "$ISSUE_TITLE\n$ISSUE_BODY" | grep -v '^$' | head -n 1 | sed 's/^.\{,100\}.*/&.../')
-            fi
+            SUMMARY=$(echo "$CONTENT" | jq -r '.summary // "'"$ISSUE_TITLE"' - Bug"')
             DESCRIPTION=$(echo "$CONTENT" | jq -r '.description // "'"$ISSUE_BODY"'"')
             PRIORITY=$(echo "$CONTENT" | jq -r '.priority // "Medium"')
             FIGMA_URL=$(echo "$CONTENT" | jq -r '.figma_url // ""')
             SCREENSHOT_URL=$(echo "$CONTENT" | jq -r '.screenshot_url // ""')
           else
-            SUMMARY=$(echo -e "$ISSUE_TITLE\n$ISSUE_BODY" | grep -v '^$' | head -n 2 | tr '\n' ' ' | sed 's/^.\{,100\}.*/&.../')
+            SUMMARY="$ISSUE_TITLE - Bug Report"
             DESCRIPTION="$ISSUE_BODY"
             PRIORITY="Medium"
             FIGMA_URL=""
             SCREENSHOT_URL=""
-            echo "Warning: AI JSON parsing failed — using smart fallback summary"
+            echo "Warning: AI parsing failed → using fallback"
           fi
 
           echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
@@ -73,37 +63,6 @@ jobs:
           echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
           echo "figma_url=$FIGMA_URL" >> $GITHUB_OUTPUT
           echo "screenshot_url=$SCREENSHOT_URL" >> $GITHUB_OUTPUT
-
-      - name: Sanitize description for Jira
-        id: sanitize
-        env:
-          RAW_DESC: ${{ steps.extract.outputs.description }}
-          SCREENSHOT: ${{ steps.extract.outputs.screenshot_url }}
-          FIGMA: ${{ steps.extract.outputs.figma_url }}
-        run: |
-          DESC="$RAW_DESC"
-
-          # Replace GitHub markdown images ![alt](url) → Jira !url!
-          DESC=$(echo "$DESC" | perl -pe 's/!\[.*?\]\((.*?)\)/!$1!/g')
-
-          # Replace raw <img ... src="url" ... /> → !url!
-          DESC=$(echo "$DESC" | perl -pe 's/<img[^>]*src=["\047](.*?)["\047][^>]*>/!$1!/gi')
-
-          # Make Figma link clickable in Jira wiki markup
-          if [ -n "$FIGMA" ]; then
-            DESC="$DESC\n\nFigma: [$FIGMA|$FIGMA]"
-          fi
-
-          # Add screenshot if present
-          if [ -n "$SCREENSHOT" ]; then
-            DESC="$DESC\n\nScreenshot: !$SCREENSHOT!"
-          fi
-
-          # Add priority and footer
-          DESC="$DESC\n\n**Priority (extracted):** ${{ steps.extract.outputs.priority || 'Medium' }}"
-          DESC="$DESC\n\nCreated from GitHub issue #${{ github.event.issue.number }} via GitHub Actions + Models (gpt-4o)"
-
-          echo "clean_description=$DESC" >> $GITHUB_OUTPUT
 
       - name: Login to Jira
         uses: atlassian/gajira-login@v3
@@ -119,13 +78,23 @@ jobs:
           project: KAN
           issuetype: Bug
           summary: ${{ steps.extract.outputs.summary }}
-          description: ${{ steps.sanitize.outputs.clean_description }}
+          description: |
+            ${{ steps.extract.outputs.description }}
+
+            **Figma Link:** ${{ steps.extract.outputs.figma_url || 'None' }}
+
+            **Screenshot:** ${{ steps.extract.outputs.screenshot_url || 'None' }}
+
+            **Priority (extracted):** ${{ steps.extract.outputs.priority || 'Medium' }}
+
+            Created from GitHub issue #${{ github.event.issue.number }}
+            via GitHub Actions + Models (gpt-4o)
 
       - name: Store Jira URL
         if: steps.create.outputs.issue != ''
         run: |
           echo "JIRA_KEY=${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
-          echo "JIRA_URL=${{ vars.JIRA_BASE_URL }}/browse/${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
+          echo "JIRA_URL=${{ secrets.JIRA_BASE_URL }}/browse/${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
 
       - name: Comment Jira link on GitHub issue
         if: env.JIRA_URL != ''
