@@ -22,8 +22,8 @@ jsonSchema: |
       "properties": {
         "content": {"type": "string", "description": "Complete issue description + exact reproduction steps"},
         "priority": {"type": "string", "description": "Priority: ONLY 'Critical', 'Non-Critical', 'Cosmetic' or 'Nice to have'"},
-        "figma_urls": {"type": "array", "items": {"type": "string"}, "description": "Figma.com URLs"},
-        "attachment_url": {"type": "array", "items": {"type": "string"}, "description": "Non-Figma URLs"}
+        "figma_urls": {"type": "string", "description": "Figma.com URLs; split with comma ','"},
+        "attachment_url": {"type": "string", "description": "Non-Figma URLs; split with comma ','"}
       },
       "additionalProperties": false,
       "required": ["content", "priority", "figma_urls", "attachment_url"]
