@@ -19,7 +19,7 @@ jobs:
         id: inference
         uses: actions/ai-inference@v1
         with:
-          prompt: './prompts/issue-extract.prompt.yml'
+          prompt-file: './prompts/issue-extract.prompt.yml'
           input: |
             body: ${{ toJSON(github.event.issue.body) }}
 
