@@ -18,13 +18,20 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Prepare single-line body (replace line breaks with spaces)
+        id: prepare
+        run: |
+          BODY="${{ github.event.issue.body }}"
+          SINGLE_LINE=$(echo "$BODY" | tr '\n' ' ' | sed 's/  */ /g')
+          echo "body=$SINGLE_LINE" >> $GITHUB_OUTPUT
+
       - name: Extract issue details
         id: inference
         uses: actions/ai-inference@v1
         with:
           prompt-file: './prompts/issue-extract.prompt.yml'
           input: |
-            body: ${{ github.event.issue.body }}
+            body: ${{ toJSON(steps.prepare.outputs.body) }}
 
       - name: Debug prompt response
         id: debug
