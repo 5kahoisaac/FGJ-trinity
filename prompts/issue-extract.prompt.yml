@@ -1,58 +1,28 @@
 name: GitHub issue extractor
 description: Extract title, description, Figma link of selection, attachments and etc from issue body
-
 model: openai/gpt-4o
-modelParameters:
-  temperature: 0.5
+modelParameters: { temperature: 0.5 }
 
 messages:
   - role: system
-    content: |
-      You are an issue report extractor. Your ONLY job is to read the message and extract the information and OUTPUT NOTHING but the JSON
+    content: "You are an issue report extractor. Your ONLY job is to read the message and extract the information and OUTPUT NOTHING but the JSON"
   - role: user
-    content: |
-      Use JSON format as specified in the response schema for:
-      <text>
-        {{body}}
-      </text>
+    content: "Use JSON format as specified in the response schema for: <text>{{body}}</text> [https://github.com/actions/ai-inference](https://github.com/actions/ai-inference)"
 
 responseFormat: json_schema
-jsonSchema: |-
+jsonSchema: |
   {
     "name": "issue_details",
     "strict": true,
     "schema": {
       "type": "object",
       "properties": {
-        "content": {
-          "type": "string",
-          "description": "Complete issue description + exact reproduction steps of the issue (if any)"
-        },
-        "priority": {
-          "type": "string",
-          "description": "Priority of the issue, ONLY accept 'critical', 'non-critical', 'cosmetic' or 'nice-to-have'"
-        },
-        "figma_urls": {
-          "type": "array",
-          "description": "The URL with 'figma.com' domain in the issue report; should be an array of string; if no figma related url found, return empty array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "attachment_url": {
-          "type": "array",
-          "description": "Every URL that do not include in 'figma_urls'; should be an array of string; if no related url found, return empty array",
-          "items": {
-            "type": "string"
-          }
-        }
+        "content": {"type": "string", "description": "Complete issue description + exact reproduction steps"},
+        "priority": {"type": "string", "description": "Priority: ONLY 'critical', 'non-critical', 'cosmetic' or 'nice-to-have'"},
+        "figma_urls": {"type": "array", "items": {"type": "string"}, "description": "Figma.com URLs"},
+        "attachment_url": {"type": "array", "items": {"type": "string"}, "description": "Non-Figma URLs"}
       },
       "additionalProperties": false,
-      "required": [
-        "content",
-        "priority",
-        "figma_urls",
-        "attachment_urls"
-      ]
+      "required": ["content", "priority", "figma_urls", "attachment_url"]
     }
   }
