@@ -31,11 +31,11 @@ jobs:
               "messages": [
                 {
                   "role": "system",
-                  "content": "You are a precise bug report parser. Output **ONLY** valid JSON with these exact keys (nothing else):\n{\"summary\": \"short one-line title\", \"description\": \"full details + repro steps\", \"priority\": \"High|Medium|Low\", \"figma_url\": \"Figma link or empty string\", \"screenshot_url\": \"image URL or empty\"}\nUse defaults if unsure."
+                  "content": "You are an expert bug report extractor. Read the entire GitHub issue carefully. Output **ONLY** valid JSON (nothing else, no explanations, no markdown). Extract EVERY Figma link and EVERY screenshot/image URL present in the title or body.\n\nRequired keys exactly:\n{\n  \"summary\": \"Clear, specific one-line summary of the actual problem (no generic text like \\\"short one-line title\\\" or \\\"bug report\\\")\",\n  \"description\": \"Complete detailed description with reproduction steps and all context\",\n  \"priority\": \"High|Medium|Low\",\n  \"figma_urls\": \"All Figma URLs as comma-separated string, or empty string if none\",\n  \"screenshot_urls\": \"All screenshot/image URLs as comma-separated string, or empty string if none\"\n}\nIf multiple Figma links or images exist, list them all separated by commas. Do not miss any URLs."
                 },
                 {
                   "role": "user",
-                  "content": "Title: \"${ISSUE_TITLE}\"\n\nBody:\n$(echo "$ISSUE_BODY" | jq -sR .)\"}"
+                  "content": "Title: \"${ISSUE_TITLE}\"\n\nBody:\n$(echo "$ISSUE_BODY" | jq -sR .)"
                 }
               ],
               "max_tokens": 600,
@@ -47,8 +47,8 @@ jobs:
             SUMMARY=$(echo "$CONTENT" | jq -r '.summary // "'"$ISSUE_TITLE"' - Bug"')
             DESCRIPTION=$(echo "$CONTENT" | jq -r '.description // "'"$ISSUE_BODY"'"')
             PRIORITY=$(echo "$CONTENT" | jq -r '.priority // "Medium"')
-            FIGMA_URL=$(echo "$CONTENT" | jq -r '.figma_url // ""')
-            SCREENSHOT_URL=$(echo "$CONTENT" | jq -r '.screenshot_url // ""')
+            FIGMA_URL=$(echo "$CONTENT" | jq -r '.figma_urls // ""')
+            SCREENSHOT_URL=$(echo "$CONTENT" | jq -r '.screenshot_urls // ""')
           else
             SUMMARY="$ISSUE_TITLE - Bug Report"
             DESCRIPTION="$ISSUE_BODY"
