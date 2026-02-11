@@ -31,89 +31,19 @@ jobs:
               "messages": [
                 {
                   "role": "system",
-                  "content": "You are a precise bug report parser. Output **ONLY** valid JSON with these exact keys (nothing else):\n{\"summary\": \"short one-line title\", \"description\": \"full details + repro steps\", \"priority\": \"High|Medium|Low\", \"figma_url\": \"Figma link or empty string\", \"screenshot_url\": \"image URL or empty\"}\nUse defaults if unsure."
+                  "content": "You are an expert at summarizing bug reports concisely and accurately. Analyze the GitHub issue title and body. Output **ONLY** valid JSON (no extra text, no markdown, no explanations) with exactly these keys:\n{\n  \"summary\": \"A clear, specific, actionable one-line summary of the ACTUAL bug/problem (make it informative and descriptive, e.g. \\\"Unexpected login button appears on KYC completion screen\\\" instead of generic phrases like \\\"bug report\\\" or \\\"short one-line title\\\")\",\n  \"description\": \"Full detailed bug description including reproduction steps, observed vs expected behavior, and all relevant context from the issue body\",\n  \"priority\": \"High|Medium|Low (infer from severity, urgency, or impact if possible; default to Medium)\",\n  \"figma_url\": \"Direct Figma prototype/node/link if present, otherwise empty string\",\n  \"screenshot_url\": \"Direct image/screenshot URL if present, otherwise empty string\"\n}\nAlways derive the summary from the real problem described in the title and body — do NOT use placeholder text."
                 },
                 {
                   "role": "user",
                   "content": "Title: \"${ISSUE_TITLE}\"\n\nBody:\n${ISSUE_BODY}"
                 }
               ],
-              "max_tokens": 600,
-              "temperature": 0.0
+              "max_tokens": 800,
+              "temperature": 0.2
             }')
 
           if echo "$RESPONSE" | jq -e '.choices[0].message.content | fromjson' >/dev/null 2>&1; then
             CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson')
-            SUMMARY=$(echo "$CONTENT" | jq -r '.summary // "'"$ISSUE_TITLE"' - Bug"')
-            DESCRIPTION=$(echo "$CONTENT" | jq -r '.description // "'"$ISSUE_BODY"'"')
-            PRIORITY=$(echo "$CONTENT" | jq -r '.priority // "Medium"')
-            FIGMA_URL=$(echo "$CONTENT" | jq -r '.figma_url // ""')
-            SCREENSHOT_URL=$(echo "$CONTENT" | jq -r '.screenshot_url // ""')
-          else
-            SUMMARY="$ISSUE_TITLE - Bug Report"
-            DESCRIPTION="$ISSUE_BODY"
-            PRIORITY="Medium"
-            FIGMA_URL=""
-            SCREENSHOT_URL=""
-            echo "Warning: AI parsing failed → using fallback"
-          fi
-
-          echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
-          echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
-          echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
-          echo "figma_url=$FIGMA_URL" >> $GITHUB_OUTPUT
-          echo "screenshot_url=$SCREENSHOT_URL" >> $GITHUB_OUTPUT
-
-      - name: Login to Jira
-        uses: atlassian/gajira-login@v3
-        env:
-          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
-          JIRA_USER_EMAIL: ${{ vars.JIRA_EMAIL }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-
-      - name: Create Jira ticket
-        id: create
-        uses: atlassian/gajira-create@v3
-        with:
-          project: KAN
-          issuetype: Bug
-          summary: ${{ steps.extract.outputs.summary }}
-          description: |
-            ${{ steps.extract.outputs.description }}
-
-            **Figma Link:** ${{ steps.extract.outputs.figma_url || 'None' }}
-
-            **Screenshot:** ${{ steps.extract.outputs.screenshot_url || 'None' }}
-
-            **Priority (extracted):** ${{ steps.extract.outputs.priority || 'Medium' }}
-
-            Created from GitHub issue #${{ github.event.issue.number }}
-            via GitHub Actions + Models (gpt-4o)
-
-      - name: Store Jira URL
-        if: steps.create.outputs.issue != ''
-        run: |
-          echo "JIRA_KEY=${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
-          echo "JIRA_URL=${{ secrets.JIRA_BASE_URL }}/browse/${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
-
-      - name: Comment Jira link on GitHub issue
-        if: env.JIRA_URL != ''
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const body = `**Jira Ticket**: ${{ env.JIRA_URL }} (Key: ${{ env.JIRA_KEY }})
-
-            **Extracted fields:**
-            - Summary: ${{ steps.extract.outputs.summary }}
-            - Priority: ${{ steps.extract.outputs.priority || 'Medium' }}
-            - Figma: ${{ steps.extract.outputs.figma_url || 'None' }}
-            - Screenshot: ${{ steps.extract.outputs.screenshot_url || 'None' }}
-
-            (auto-created from issue #${{ github.event.issue.number }})`;
-
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body
-            });
+            SUMMARY=$(echo "$CONTENT" | jq -r '.summary // "'"$ISSUE_TITLE"'"')
+            # Emergency cleanup if summary is still too generic
+            if [[ "$SUMMARY" =~ "short one-line" || "$SUMMARY" =~ "Bug Report" || -z "$SUMMARY" ]]; then
