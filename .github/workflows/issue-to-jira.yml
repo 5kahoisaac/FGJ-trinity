@@ -1,0 +1,101 @@
+name: Issue to Jira Ticket
+on:
+  issues:
+    types: [opened]  # Only new issues, NOT label changes
+permissions:
+  issues: write
+  models: read
+
+jobs:
+  extract-and-create-jira:
+    # Skip job entirely unless issue was opened AND has 'bug' label
+    if: contains(github.event.issue.labels.*.name, 'bug')
+    runs-on: ubuntu-latest
+    steps:
+    - name: Extract bug data with AI
+      id: extract
+      env:
+        ISSUE_BODY: ${{ github.event.issue.body }}
+        ISSUE_NUMBER: ${{ github.event.issue.number }}
+        ISSUE_TITLE: ${{ github.event.issue.title }}
+      run: |
+        RESPONSE=$(curl -s -X POST https://models.inference.ai.azure.com/models/${{ vars.MODEL_ID }}/chat/completions \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Content-Type: application/json" \
+          -d '{
+            "messages": [{
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Extract bug report fields from this GitHub issue. Look for screenshot URLs, Figma links, expected/actual text. Output ONLY valid JSON:\n{\n  \"summary\": \"One-line bug summary\",\n  \"description\": \"Full description with steps\",\n  \"priority\": \"High|Medium|Low\",\n  \"figma_url\": \"Figma prototype/node link or empty\",\n  \"screenshot_url\": \"GitHub image URL or empty\",\n  \"project_key\": \"YOUR-PROJECT-KEY\"\n}\n\nIssue: Title: '"${ISSUE_TITLE}"'\nBody:\n${ISSUE_BODY}"
+                }
+              ]
+            }],
+            "max_tokens": 500,
+            "temperature": 0.1
+          }')
+        
+        echo "extraction<<EOF" >> $GITHUB_OUTPUT
+        echo "$RESPONSE" >> $GITHUB_OUTPUT
+        echo "<<EOF" >> $GITHUB_OUTPUT
+        
+        SUMMARY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content' | jq -r '.summary // empty')
+        FIGMA_URL=$(echo "$RESPONSE" | jq -r '.choices[0].message.content' | jq -r '.figma_url // empty')
+        PRIORITY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content' | jq -r '.priority // "Medium"')
+        DESCRIPTION=$(echo "$RESPONSE" | jq -r '.choices[0].message.content' | jq -r '.description // "Bug reported via Figma widget"')
+        PROJECT_KEY=$(echo "$RESPONSE" | jq -r '.choices[0].message.content' | jq -r '.project_key // "YOUR-PROJECT-KEY"')
+        SCREENSHOT_URL=$(echo "$RESPONSE" | jq -r '.choices[0].message.content' | jq -r '.screenshot_url // ""')
+        
+        echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
+        echo "figma_url=$FIGMA_URL" >> $GITHUB_OUTPUT
+        echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
+        echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
+        echo "project_key=$PROJECT_KEY" >> $GITHUB_OUTPUT
+        echo "screenshot_url=$SCREENSHOT_URL" >> $GITHUB_OUTPUT
+
+    - name: Create Jira Ticket
+      if: steps.extract.outputs.summary != ''
+      env:
+        JIRA_BASE_URL: ${{ secrets.JIRA_BASE_URL }}
+        JIRA_EMAIL: ${{ secrets.JIRA_EMAIL }}
+        JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+      run: |
+        JIRA_PAYLOAD=$(jq -n \
+          --arg summary "${{ steps.extract.outputs.summary }}" \
+          --arg desc "${{ steps.extract.outputs.description }}" \
+          --arg figma "${{ steps.extract.outputs.figma_url }}" \
+          --arg screenshot "${{ steps.extract.outputs.screenshot_url }}" \
+          --arg project "${{ steps.extract.outputs.project_key }}" \
+          --arg priority "${{ steps.extract.outputs.priority }}" \
+          '{
+            "fields": {
+              "project": { "key": $project },
+              "summary": $summary,
+              "description": ($desc + "\n\nFigma: " + $figma + "\nScreenshot: " + $screenshot),
+              "issuetype": { "name": "Bug" },
+              "priority": { "name": $priority }
+            }
+          }')
+        
+        JIRA_RESPONSE=$(curl -s -X POST \
+          "$JIRA_BASE_URL/rest/api/3/issue" \
+          -H "Authorization: Basic $(echo -n $JIRA_EMAIL:$JIRA_API_TOKEN | base64)" \
+          -H "Content-Type: application/json" \
+          -d "$JIRA_PAYLOAD")
+        
+        JIRA_KEY=$(echo "$JIRA_RESPONSE" | jq -r '.key')
+        JIRA_URL="$JIRA_BASE_URL/browse/$JIRA_KEY"
+        echo "JIRA_URL=$JIRA_URL" >> $GITHUB_ENV
+
+    - name: Comment Jira URL back to GitHub issue
+      if: steps.extract.outputs.summary != '' && env.JIRA_URL != ''
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `✅ Jira ticket created: ${{ env.JIRA_URL }}\n\n*(Auto-generated from Figma widget issue)*`
+          })
