@@ -7,7 +7,10 @@ messages:
   - role: system
     content: "You are an issue report extractor. Your ONLY job is to read the message and extract the information and OUTPUT NOTHING but the JSON"
   - role: user
-    content: "Use JSON format as specified in the response schema for: <text>{{body}}</text>"
+    content: |
+      Use JSON format as specified in the response schema for the following issue body:
+
+      {{body}}
 
 responseFormat: json_schema
 jsonSchema: |

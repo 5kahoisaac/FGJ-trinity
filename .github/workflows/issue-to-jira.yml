@@ -18,13 +18,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Save issue body to file
+        run: |
+          cat <<EOF > issue_body.txt
+          ${{ github.event.issue.body }}
+          EOF
+
       - name: Extract issue details
         id: inference
         uses: actions/ai-inference@v1
         with:
           prompt-file: './prompts/issue-extract.prompt.yml'
-          input: |
-            body: ${{ toJSON(github.event.issue.body) }}
+          file_input: |
+            body: issue_body.txt
 
       - name: Debug prompt response
         id: debug
