@@ -15,63 +15,17 @@ jobs:
     if: contains(github.event.issue.labels.*.name, 'bug')
     runs-on: ubuntu-latest
     steps:
-      - name: Extract bug data with GitHub Models (gpt-4o)
-        id: extract
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
-        run: |
-          RESPONSE=$(curl -s -X POST \
-            -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Content-Type: application/json" \
-            https://models.github.ai/inference/chat/completions \
-            -d '{
-              "model": "openai/gpt-4o",
-              "messages": [
-                {
-                  "role": "system",
-                  "content": "You are a precise bug report parser; output only valid JSON with these exact keys — `summary` (short one-line title), `description` (full details and repro steps), `priority` ("High" | "Medium" | "Low"), `figma_url` (Figma link or empty, split by comma), and `attachment_url` (image or file URLs, or empty, split by comma) — using defaults if unsure."
-                },
-                {
-                  "role": "user",
-                  "content": "Title: \"${ISSUE_TITLE}\"\n\nBody:\n$(echo "$ISSUE_BODY" | jq -sR .)"
-                }
-              ],
-              "max_tokens": 600,
-              "temperature": 0.0
-            }')
+      - name: Extract issue details
+        id: inference
+        uses: actions/ai-inference@v1
+        with:
+          prompt: '.github/prompts/issue-extract.prompt.yml'
+          input:
+            body: ${{ toJSON(github.event.issue.body) }}
 
-          echo "$(echo "$ISSUE_BODY" | jq -sR .)";
-
-          if echo "$RESPONSE" | jq -e '.choices[0].message.content | fromjson' >/dev/null 2>&1; then
-            CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson')
-            SUMMARY=$(echo "$CONTENT" | jq -r '.summary // "'"$ISSUE_TITLE"' - Bug"')
-            DESCRIPTION=$(echo "$CONTENT" | jq -r '.description // "'"$ISSUE_BODY"'"')
-            PRIORITY=$(echo "$CONTENT" | jq -r '.priority // "Medium"')
-            FIGMA_URL=$(echo "$CONTENT" | jq -r '.figma_url // ""')
-            SCREENSHOT_URL=$(echo "$CONTENT" | jq -r '.screenshot_url // ""')
-
-            # Extra debug: show what we actually extracted
-            echo "Extracted summary: $SUMMARY"
-            echo "Extracted description (first 300 chars): ${DESCRIPTION:0:300}..."
-            echo "Extracted priority: $PRIORITY"
-            echo "Extracted figma_url: $FIGMA_URL"
-            echo "Extracted screenshot_url: $SCREENSHOT_URL"
-          else
-            SUMMARY="$ISSUE_TITLE - Bug Report"
-            DESCRIPTION="$ISSUE_BODY"
-            PRIORITY="Medium"
-            FIGMA_URL=""
-            SCREENSHOT_URL=""
-            echo "Warning: AI parsing failed → using fallback"
-          fi
-
-          echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
-          echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
-          echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
-          echo "figma_url=$FIGMA_URL" >> $GITHUB_OUTPUT
-          echo "screenshot_url=$SCREENSHOT_URL" >> $GITHUB_OUTPUT
+      - name: Debug prompt response
+        id: debug
+        run: echo "${{ steps.inference.outputs.response }}"
 
       - name: Login to Jira
         uses: atlassian/gajira-login@v3
@@ -86,18 +40,13 @@ jobs:
         with:
           project: KAN
           issuetype: Bug
-          summary: ${{ steps.extract.outputs.summary }}
+          summary: ${{ github.event.issue.title }}
           description: |
-            ${{ steps.extract.outputs.description }}
+            ${{ fromJSON(steps.inference.outputs.response).content }}
 
-            **Figma Link:** ${{ steps.extract.outputs.figma_url || 'None' }}
-
-            **Screenshot:** ${{ steps.extract.outputs.screenshot_url || 'None' }}
-
-            **Priority (extracted):** ${{ steps.extract.outputs.priority || 'Medium' }}
+            **Priority (extracted):** ${{ fromJSON(steps.inference.outputs.response).priority }}
 
             Created from GitHub issue #${{ github.event.issue.number }}
-            via GitHub Actions + Models (gpt-4o)
 
       - name: Store Jira URL
         if: steps.create.outputs.issue != ''
@@ -110,15 +59,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `**Jira Ticket**: ${{ env.JIRA_URL }} (Key: ${{ env.JIRA_KEY }})
-
-            **Extracted fields:**
-            - Summary: ${{ steps.extract.outputs.summary }}
-            - Priority: ${{ steps.extract.outputs.priority || 'Medium' }}
-            - Figma: ${{ steps.extract.outputs.figma_url || 'None' }}
-            - Screenshot: ${{ steps.extract.outputs.screenshot_url || 'None' }}
-
-            (auto-created from issue #${{ github.event.issue.number }})`;
+            const body = `**Jira Ticket**: [Here](${{ vars.JIRA_BASE_URL }}${{ env.JIRA_KEY }})`;
 
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
