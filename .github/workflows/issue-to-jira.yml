@@ -18,6 +18,7 @@ jobs:
         ISSUE_BODY: ${{ github.event.issue.body }}
         ISSUE_NUMBER: ${{ github.event.issue.number }}
         ISSUE_TITLE: ${{ github.event.issue.title }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         RESPONSE=$(curl -s -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" -H "User-Agent: GitHubActions" -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Extract bug report fields from GitHub issue. Output ONLY valid JSON: {\"summary\":\"One-line bug summary\",\"description\":\"Full description\",\"priority\":\"High|Medium|Low\",\"figma_url\":\"Figma link or empty\",\"screenshot_url\":\"image URL or empty\",\"project_key\":\"YOUR-PROJECT-KEY\"}\n\nTitle: ${ISSUE_TITLE}\nBody: ${ISSUE_BODY}"}],"max_tokens":500,"temperature":0.1}' https://models.github.com/v1/chat/completions)
         
