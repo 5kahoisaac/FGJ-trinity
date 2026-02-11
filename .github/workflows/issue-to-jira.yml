@@ -31,7 +31,7 @@ jobs:
               "messages": [
                 {
                   "role": "system",
-                  "content": "You are an expert bug report extractor. Read the entire GitHub issue carefully. Output **ONLY** valid JSON (nothing else, no explanations, no markdown). Extract EVERY Figma link and EVERY screenshot/image URL present in the title or body.\n\nRequired keys exactly:\n{\n  \"summary\": \"Clear, specific one-line summary of the actual problem (no generic text like \\\"short one-line title\\\" or \\\"bug report\\\")\",\n  \"description\": \"Complete detailed description with reproduction steps and all context\",\n  \"priority\": \"High|Medium|Low\",\n  \"figma_urls\": \"All Figma URLs as comma-separated string, or empty string if none\",\n  \"screenshot_urls\": \"All screenshot/image URLs as comma-separated string, or empty string if none\"\n}\nIf multiple Figma links or images exist, list them all separated by commas. Do not miss any URLs."
+                  "content": "You are a precise bug report parser. Output **ONLY** valid JSON with these exact keys (nothing else):\n{\"summary\": \"short one-line title\", \"description\": \"full details + repro steps\", \"priority\": \"High|Medium|Low\", \"figma_url\": \"Figma link or empty string\", \"screenshot_url\": \"image URL or empty\"}\nUse defaults if unsure."
                 },
                 {
                   "role": "user",
@@ -42,13 +42,34 @@ jobs:
               "temperature": 0.0
             }')
 
+          # Debug: Print raw response from the model
+          echo "===== DEBUG: Raw API Response from GitHub Models ====="
+          echo "$RESPONSE"
+          echo "===== END RAW RESPONSE ====="
+
+          # Debug: Try to show the actual content the model returned
+          echo "===== DEBUG: Model content (if exists) ====="
+          if echo "$RESPONSE" | jq -e '.choices[0].message.content' >/dev/null 2>&1; then
+            echo "$RESPONSE" | jq -r '.choices[0].message.content'
+          else
+            echo "No valid .choices[0].message.content found"
+          fi
+          echo "===== END MODEL CONTENT ====="
+
           if echo "$RESPONSE" | jq -e '.choices[0].message.content | fromjson' >/dev/null 2>&1; then
             CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson')
             SUMMARY=$(echo "$CONTENT" | jq -r '.summary // "'"$ISSUE_TITLE"' - Bug"')
             DESCRIPTION=$(echo "$CONTENT" | jq -r '.description // "'"$ISSUE_BODY"'"')
             PRIORITY=$(echo "$CONTENT" | jq -r '.priority // "Medium"')
-            FIGMA_URL=$(echo "$CONTENT" | jq -r '.figma_urls // ""')
-            SCREENSHOT_URL=$(echo "$CONTENT" | jq -r '.screenshot_urls // ""')
+            FIGMA_URL=$(echo "$CONTENT" | jq -r '.figma_url // ""')
+            SCREENSHOT_URL=$(echo "$CONTENT" | jq -r '.screenshot_url // ""')
+
+            # Extra debug: show what we actually extracted
+            echo "Extracted summary: $SUMMARY"
+            echo "Extracted description (first 300 chars): ${DESCRIPTION:0:300}..."
+            echo "Extracted priority: $PRIORITY"
+            echo "Extracted figma_url: $FIGMA_URL"
+            echo "Extracted screenshot_url: $SCREENSHOT_URL"
           else
             SUMMARY="$ISSUE_TITLE - Bug Report"
             DESCRIPTION="$ISSUE_BODY"
