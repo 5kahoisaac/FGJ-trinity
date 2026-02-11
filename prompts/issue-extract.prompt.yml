@@ -26,6 +26,6 @@ jsonSchema: |
         "attachment_urls": {"type": "array", "items": {"type": "string"}, "description": "Non-Figma URLs"}
       },
       "additionalProperties": false,
-      "required": ["content", "priority", "figma_urls", "attachment_url"]
+      "required": ["content", "priority", "figma_urls", "attachment_urls"]
     }
   }
