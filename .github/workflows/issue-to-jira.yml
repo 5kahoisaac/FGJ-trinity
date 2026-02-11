@@ -18,12 +18,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Prepare single-line body (replace line breaks with spaces)
-        id: prepare
-        run: |
-          BODY="${{ github.event.issue.body }}"
-          SINGLE_LINE=$(echo "$BODY" | tr '\n' ' ' | sed 's/  */ /g')
-          echo "body=$SINGLE_LINE" >> $GITHUB_OUTPUT
+      - name: Install jq
+        run: sudo apt-get update && sudo apt-get install -y jq
 
       - name: Extract issue details
         id: inference
@@ -31,45 +27,104 @@ jobs:
         with:
           prompt-file: './prompts/issue-extract.prompt.yml'
           input: |
-            body: ${{ toJSON(steps.prepare.outputs.body) }}
+            body: |
+              ${{ github.event.issue.body }}
 
-      - name: Debug prompt response
-        id: debug
-        run: echo "${{ steps.inference.outputs.response }}"
+      - name: Prepare Jira fields
+        id: jira_fields
+        run: |
+          response="${{ steps.inference.outputs.response }}"
 
-      - name: Login to Jira
-        uses: atlassian/gajira-login@v3
+          priority=$(echo "$response" | jq -r '.priority')
+          content=$(echo "$response" | jq -r '.content')
+
+          figma_section=$(echo "$response" | jq -r 'if (.figma_urls | length) > 0 then "h2. Figma Designs\n" + (.figma_urls | map("* " + .) | join("\n")) + "\n\n" else "h2. Figma Designs\nNone provided.\n\n" end')
+
+          attach_section=$(echo "$response" | jq -r 'if (.attachment_urls | length) > 0 then "h2. Attachments\nAttachments have been uploaded to this Jira ticket via automation.\n\n" else "" end')
+
+          attachment_urls=$(echo "$response" | jq -r '.attachment_urls[]' 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//' || echo "")
+
+          echo "attachment_urls=$attachment_urls" >> $GITHUB_OUTPUT
+
+          echo "description<<DELIMITER" >> $GITHUB_OUTPUT
+          echo "h2. Priority" >> $GITHUB_OUTPUT
+          echo "*$priority*" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "h2. GitHub Issue" >> $GITHUB_OUTPUT
+          echo "[#${{ github.event.issue.number }} - ${{ github.event.issue.title }}|${{ github.event.issue.html_url }}]" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "h2. Summary" >> $GITHUB_OUTPUT
+          echo "$content" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "$figma_section" >> $GITHUB_OUTPUT
+          echo "$attach_section" >> $GITHUB_OUTPUT
+          echo "DELIMITER" >> $GITHUB_OUTPUT
+
+      - name: Create Jira Issue
+        id: create
+        uses: bryannice/gitactions-jira-issue-creation@master
+        env:
+          JIRA_ACCOUNT_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_USERNAME: ${{ vars.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_PROJECT: ${{ vars.JIRA_PROJECT_KEY }}
+          JIRA_ISSUE_TYPE: Bug
+          JIRA_ISSUE_SUMMARY: ${{ github.event.issue.title }}
+          JIRA_ISSUE_DESCRIPTION: ${{ steps.jira_fields.outputs.description }}
+
+      - name: Extract Jira Issue Key
+        id: jira_key
+        run: |
+          url="${{ steps.create.outputs.jira_issue_url }}"
+          key=$(basename "$url")
+          echo "key=$key" >> $GITHUB_OUTPUT
+
+      - name: Download and Upload Attachments
+        if: steps.jira_fields.outputs.attachment_urls != ''
         env:
           JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
-          JIRA_USER_EMAIL: ${{ vars.JIRA_EMAIL }}
-          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
-
-      - name: Create Jira ticket
-        id: create
-        uses: atlassian/gajira-create@v3
-        with:
-          project: ${{ vars.JIRA_PROJECT_KEY }}
-          issuetype: Bug
-          summary: ${{ github.event.issue.title }}
-          description: |
-            ${{ fromJSON(steps.inference.outputs.response).content }}
-
-            **Priority (extracted):** ${{ fromJSON(steps.inference.outputs.response).priority }}
-
-            Created from GitHub issue #${{ github.event.issue.number }}
-
-      - name: Store Jira URL
-        if: steps.create.outputs.issue != ''
+          JIRA_EMAIL: ${{ vars.JIRA_EMAIL }}
+          JIRA_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+          JIRA_KEY: ${{ steps.jira_key.outputs.key }}
+          ATTACHMENT_URLS: ${{ steps.jira_fields.outputs.attachment_urls }}
         run: |
-          echo "JIRA_KEY=${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
-          echo "JIRA_URL=${{ vars.JIRA_BASE_URL }}/browse/${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
+          mkdir -p ~/attachments
+          cd ~/attachments
+
+          for url in $ATTACHMENT_URLS; do
+            filename=$(basename "$url" | cut -d'?' -f1)
+            echo "Downloading: $url → $filename"
+            curl -fsSL -o "$filename" "$url" || {
+              echo "Failed to download $url"
+              continue
+            }
+
+            if [ ! -s "$filename" ]; then
+              echo "$filename is empty – skipping upload"
+              continue
+            fi
+
+            echo "Uploading $filename to Jira $JIRA_KEY"
+            http_code=$(curl -s -w "%{http_code}" -o /tmp/upload_response.json \
+              -H "X-Atlassian-Token: no-check" \
+              -u "$JIRA_EMAIL:$JIRA_TOKEN" \
+              -X POST \
+              -F "file=@$filename" \
+              "$JIRA_BASE_URL/rest/api/3/issue/$JIRA_KEY/attachments")
+
+            if [[ $http_code =~ ^2 ]]; then
+              echo "Successfully uploaded $filename"
+            else
+              echo "Upload failed with HTTP $http_code"
+              cat /tmp/upload_response.json || true
+            fi
+          done
 
       - name: Comment Jira link on GitHub issue
-        if: env.JIRA_URL != ''
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `**Jira Ticket**: [${{ env.JIRA_KEY }}](${{ env.JIRA_URL }})`;
+            const body = `**Jira Ticket**: ${{ steps.create.outputs.jira_issue_url }}`;
 
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
