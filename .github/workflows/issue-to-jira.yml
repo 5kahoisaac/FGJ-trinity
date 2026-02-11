@@ -48,11 +48,19 @@ jobs:
           issuetype: Bug
           summary: ${{ github.event.issue.title }}
           description: |
+            h2. Priority
+            ${{ fromJSON(steps.inference.outputs.response).priority }}
+            
+            h2. GitHub issue
+            [#${{ github.event.issue.number }}|${{ github.event.issue.url }}]
+            
+            h2. Summary
             ${{ fromJSON(steps.inference.outputs.response).content }}
+
+            h2. Figma Links
             
-            **Priority (extracted):** ${{ fromJSON(steps.inference.outputs.response).priority }}
             
-            Created from GitHub issue #${{ github.event.issue.number }}
+            h2. Attachments
 
       - name: Store Jira URL
         if: steps.create.outputs.issue != ''
