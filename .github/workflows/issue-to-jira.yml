@@ -61,7 +61,7 @@ jobs:
             ${{ join(fromJSON(steps.inference.outputs.response).figma_urls, ' , ') }}
             
             h2. Attachments
-            !${{ join(fromJSON(steps.inference.outputs.response).attachment_urls, '! !') }}!
+            !${{ join(fromJSON(steps.inference.outputs.response).attachment_urls, '!!') }}!
 
       - name: Store Jira URL
         if: steps.create.outputs.issue != ''
