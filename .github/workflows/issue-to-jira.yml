@@ -61,7 +61,7 @@ jobs:
         if: steps.create.outputs.issue != ''
         run: |
           echo "JIRA_KEY=${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
-          echo "JIRA_URL=${{ secrets.JIRA_BASE_URL }}/browse/${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
+          echo "JIRA_URL=${{ vars.JIRA_BASE_URL }}/browse/${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
 
       - name: Comment Jira link on GitHub issue
         if: env.JIRA_URL != ''
