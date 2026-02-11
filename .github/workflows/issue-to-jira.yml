@@ -18,8 +18,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Prepare single-line body (replace line breaks with spaces)
+        id: prepare
+        run: |
+          BODY="${{ github.event.issue.body }}"
+          SINGLE_LINE=$(echo "$BODY" | tr '\n' ' ' | sed 's/  */ /g')
+          echo "body=$SINGLE_LINE" >> $GITHUB_OUTPUT
 
       - name: Extract issue details
         id: inference
@@ -27,8 +31,7 @@ jobs:
         with:
           prompt-file: './prompts/issue-extract.prompt.yml'
           input: |
-            body: |
-              ${{ github.event.issue.body }}
+            body: ${{ toJSON(steps.prepare.outputs.body) }}
 
       - name: Login
         uses: atlassian/gajira-login@v3
