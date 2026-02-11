@@ -40,23 +40,33 @@ jobs:
           JIRA_USER_EMAIL: ${{ vars.JIRA_EMAIL }}
           JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
 
-      - name: Create Jira Issue
+      - name: Create Jira ticket
         id: create
-        uses: atlassian/gajira-todo@v3
+        uses: atlassian/gajira-create@v3
         with:
           project: ${{ vars.JIRA_PROJECT_KEY }}
           issuetype: Bug
           summary: ${{ github.event.issue.title }}
-          description: Testing
-        env:
-          GITHUB_TOKEN: ${{ steps.jira_fields.outputs.description }}
+          description: |
+            ${{ fromJSON(steps.inference.outputs.response).content }}
+            
+            **Priority (extracted):** ${{ fromJSON(steps.inference.outputs.response).priority }}
+            
+            Created from GitHub issue #${{ github.event.issue.number }}
+
+      - name: Store Jira URL
+        if: steps.create.outputs.issue != ''
+        run: |
+          echo "JIRA_KEY=${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
+          echo "JIRA_URL=${{ vars.JIRA_BASE_URL }}/browse/${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
 
       - name: Comment Jira link on GitHub issue
+        if: env.JIRA_URL != ''
         uses: actions/github-script@v7
         with:
           script: |
-            const body = `**Jira Ticket**: ${{ vars.JIRA_BASE_URL }}/browse/${{ steps.create.outputs.issue }}`;
-
+            const body = `**Jira Ticket**: [${{ env.JIRA_KEY }}](${{ env.JIRA_URL }})`;
+            
             await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
