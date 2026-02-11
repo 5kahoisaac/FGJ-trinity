@@ -42,4 +42,109 @@ jobs:
               temperature: 0.2
             }')
 
-          RESPONSE=$(curl -s -X
+          RESPONSE=$(curl -s -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Content-Type: application/json" \
+            https://models.github.ai/inference/chat/completions \
+            -d "$PAYLOAD")
+
+          if echo "$RESPONSE" | jq -e '.choices[0].message.content | fromjson' >/dev/null 2>&1; then
+            CONTENT=$(echo "$RESPONSE" | jq -r '.choices[0].message.content | fromjson')
+            SUMMARY=$(echo "$CONTENT" | jq -r '.summary // "'"$ISSUE_TITLE"'"')
+            # Emergency cleanup if summary is still too generic
+            if [[ "$SUMMARY" =~ "short one-line" || "$SUMMARY" =~ "Bug Report" || -z "$SUMMARY" ]]; then
+              SUMMARY=$(echo -e "$ISSUE_TITLE\n$ISSUE_BODY" | grep -v '^$' | head -n 1 | sed 's/^.\{,100\}.*/&.../')
+            fi
+            DESCRIPTION=$(echo "$CONTENT" | jq -r '.description // "'"$ISSUE_BODY"'"')
+            PRIORITY=$(echo "$CONTENT" | jq -r '.priority // "Medium"')
+            FIGMA_URL=$(echo "$CONTENT" | jq -r '.figma_url // ""')
+            SCREENSHOT_URL=$(echo "$CONTENT" | jq -r '.screenshot_url // ""')
+          else
+            SUMMARY=$(echo -e "$ISSUE_TITLE\n$ISSUE_BODY" | grep -v '^$' | head -n 2 | tr '\n' ' ' | sed 's/^.\{,100\}.*/&.../')
+            DESCRIPTION="$ISSUE_BODY"
+            PRIORITY="Medium"
+            FIGMA_URL=""
+            SCREENSHOT_URL=""
+            echo "Warning: AI JSON parsing failed — using smart fallback summary"
+          fi
+
+          echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
+          echo "description=$DESCRIPTION" >> $GITHUB_OUTPUT
+          echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
+          echo "figma_url=$FIGMA_URL" >> $GITHUB_OUTPUT
+          echo "screenshot_url=$SCREENSHOT_URL" >> $GITHUB_OUTPUT
+
+      - name: Sanitize description for Jira
+        id: sanitize
+        env:
+          RAW_DESC: ${{ steps.extract.outputs.description }}
+          SCREENSHOT: ${{ steps.extract.outputs.screenshot_url }}
+          FIGMA: ${{ steps.extract.outputs.figma_url }}
+        run: |
+          DESC="$RAW_DESC"
+
+          # Replace GitHub markdown images ![alt](url) → Jira !url!
+          DESC=$(echo "$DESC" | perl -pe 's/!\[.*?\]\((.*?)\)/!$1!/g')
+
+          # Replace raw <img ... src="url" ... /> → !url!
+          DESC=$(echo "$DESC" | perl -pe 's/<img[^>]*src=["\047](.*?)["\047][^>]*>/!$1!/gi')
+
+          # Make Figma link clickable in Jira wiki markup
+          if [ -n "$FIGMA" ]; then
+            DESC="$DESC\n\nFigma: [$FIGMA|$FIGMA]"
+          fi
+
+          # Add screenshot if present
+          if [ -n "$SCREENSHOT" ]; then
+            DESC="$DESC\n\nScreenshot: !$SCREENSHOT!"
+          fi
+
+          # Add priority and footer
+          DESC="$DESC\n\n**Priority (extracted):** ${{ steps.extract.outputs.priority || 'Medium' }}"
+          DESC="$DESC\n\nCreated from GitHub issue #${{ github.event.issue.number }} via GitHub Actions + Models (gpt-4o)"
+
+          echo "clean_description=$DESC" >> $GITHUB_OUTPUT
+
+      - name: Login to Jira
+        uses: atlassian/gajira-login@v3
+        env:
+          JIRA_BASE_URL: ${{ vars.JIRA_BASE_URL }}
+          JIRA_USER_EMAIL: ${{ vars.JIRA_EMAIL }}
+          JIRA_API_TOKEN: ${{ secrets.JIRA_API_TOKEN }}
+
+      - name: Create Jira ticket
+        id: create
+        uses: atlassian/gajira-create@v3
+        with:
+          project: KAN
+          issuetype: Bug
+          summary: ${{ steps.extract.outputs.summary }}
+          description: ${{ steps.sanitize.outputs.clean_description }}
+
+      - name: Store Jira URL
+        if: steps.create.outputs.issue != ''
+        run: |
+          echo "JIRA_KEY=${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
+          echo "JIRA_URL=${{ vars.JIRA_BASE_URL }}/browse/${{ steps.create.outputs.issue }}" >> $GITHUB_ENV
+
+      - name: Comment Jira link on GitHub issue
+        if: env.JIRA_URL != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `**Jira Ticket**: ${{ env.JIRA_URL }} (Key: ${{ env.JIRA_KEY }})
+
+            **Extracted fields:**
+            - Summary: ${{ steps.extract.outputs.summary }}
+            - Priority: ${{ steps.extract.outputs.priority || 'Medium' }}
+            - Figma: ${{ steps.extract.outputs.figma_url || 'None' }}
+            - Screenshot: ${{ steps.extract.outputs.screenshot_url || 'None' }}
+
+            (auto-created from issue #${{ github.event.issue.number }})`;
+
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
