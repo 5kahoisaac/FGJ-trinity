@@ -15,6 +15,9 @@ jobs:
     if: contains(github.event.issue.labels.*.name, 'bug')
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Extract issue details
         id: inference
         uses: actions/ai-inference@v1
@@ -38,7 +41,7 @@ jobs:
         id: create
         uses: atlassian/gajira-create@v3
         with:
-          project: KAN
+          project: ${{ vars.JIRA_PROJECT_KEY }}
           issuetype: Bug
           summary: ${{ github.event.issue.title }}
           description: |
