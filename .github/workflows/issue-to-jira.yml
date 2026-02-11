@@ -20,7 +20,7 @@ jobs:
         uses: actions/ai-inference@v1
         with:
           prompt: '.github/prompts/issue-extract.prompt.yml'
-           input: |
+          input: |
             body: ${{ toJSON(github.event.issue.body) }}
 
       - name: Debug prompt response
