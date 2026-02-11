@@ -29,7 +29,7 @@ jsonSchema: |-
         },
         "priority": {
           "type": "string",
-          "description": "Priority of the issue, ONLY accept 'critial', 'non-critial' or 'nice-to-have'"
+          "description": "Priority of the issue, ONLY accept 'critical', 'non-critical', 'cosmetic' or 'nice-to-have'"
         },
         "figma_urls": {
           "type": "array",
