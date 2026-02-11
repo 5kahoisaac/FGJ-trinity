@@ -7,10 +7,9 @@ messages:
   - role: system
     content: "You are an issue report extractor. Your ONLY job is to read the message and extract the information and OUTPUT NOTHING but the JSON"
   - role: user
-    content: "Use JSON format as specified in the response schema for: <text>{{body}}</text> [https://github.com/actions/ai-inference](https://github.com/actions/ai-inference)"
+    content: "Use JSON format as specified in the response schema for: <text>{{body}}</text>"
 
-responseFormat: |
-  json_schema
+responseFormat: json_schema
 jsonSchema: |
   {
     "name": "issue_details",
