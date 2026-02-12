@@ -225,6 +225,26 @@ The AI extracts the following fields from issue body:
 4. Attach screenshots if needed
 5. Submit - the workflow will automatically create a Jira ticket
 
+## Example
+
+See a real-world example of this workflow in action: [Issue #60](https://github.com/5kahoisaac/FGJ-trinity/issues/60)
+
+This issue demonstrates:
+- A bug report created with Figma context
+- AI-extracted information (priority, summary, Figma links)
+- The automated Jira ticket creation
+- The workflow comment with the Jira ticket link
+
+### What you'll see in Issue #60:
+
+1. **Original GitHub Issue**: Contains the bug description with Figma links and screenshots
+2. **GitHub Actions Workflow**: Automatically triggered when the issue was labeled as `bug`
+3. **AI Extraction**: The prompt extracted structured data from the issue body
+4. **Jira Ticket Created**: A corresponding bug ticket was created in Jira
+5. **Comment Posted**: The workflow commented on the issue with the Jira ticket link
+
+This is the expected result after setting up the workflow in your own repository.
+
 ## Permissions
 
 The workflow requires these permissions:
