@@ -168,7 +168,7 @@ Stores the created Jira ticket key and URL for later use.
   uses: actions/github-script@v7
   with:
     script: |
-      const body = `**Jira ticket** [${{ env.JIRA_KEY }}](${{ env.JIRA_URL }}) Created via GitHub Action.`;
+      const body = `**Jira ticket** [${{ env.JIRA_KEY }}](${{ env.JIRA_URL }}) created via GitHub Action.`;
       
       await github.rest.issues.createComment({
         issue_number: context.issue.number,
